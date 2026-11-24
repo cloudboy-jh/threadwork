@@ -1,6 +1,6 @@
 # Threadwork
 
-A native macOS quick-access network monitor. Open from the dotted menu-bar icon or **Control–Option–Space**; dismiss with Escape or by clicking away. No Dock icon.
+A native macOS network monitor in a dropdown anchored beneath its dotted menu-bar icon, like LocalPulse—not a separate floating app window. Click the icon or press **Control–Option–Space** to toggle it; dismiss with Escape or by clicking away. No Dock icon.
 
 ## Build and open
 
@@ -28,4 +28,4 @@ For a live UI capture during development:
 open build/Threadwork.app --args --capture /tmp/threadwork.png
 ```
 
-The capture is of the actual running panel after six seconds, with live network readings, not sample data.
+The capture shows the actual dropdown content after six seconds, with live network readings, not sample data. Console output includes the dropdown and menu-bar icon frames so attachment can be checked without screen-recording permission.

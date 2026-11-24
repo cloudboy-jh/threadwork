@@ -14,29 +14,19 @@ struct ThreadworkApp {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = NetworkStore()
     private var statusItem: NSStatusItem!
-    private var panel: QuickPanel!
+    private let popover = NSPopover()
     private var hotKey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private var localMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        panel = QuickPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 700),
-                           styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
-        panel.title = "Threadwork"
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.isReleasedWhenClosed = false
-        panel.delegate = self
-        panel.contentView = NSHostingView(rootView: ThreadworkView().environmentObject(store))
+        popover.behavior = .transient
+        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        popover.contentViewController = NSHostingController(rootView: ThreadworkView().environmentObject(store))
+        popover.contentSize = NSSize(width: 520, height: 700)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "circle.grid.3x3.fill", accessibilityDescription: "Threadwork")
         statusItem.button?.target = self
@@ -44,46 +34,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.button?.toolTip = "Threadwork · ⌃⌥Space"
         registerShortcut()
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53, self?.panel.isVisible == true {
-                if self?.panel.attachedSheet != nil { return event }
-                self?.panel.orderOut(nil); return nil
+            if event.keyCode == 53, self?.popover.isShown == true {
+                if self?.popover.contentViewController?.view.window?.attachedSheet != nil { return event }
+                self?.popover.performClose(nil); return nil
             }
             return event
         }
         store.start()
-        if CommandLine.arguments.contains("--show") { showPanel() }
+        if CommandLine.arguments.contains("--show") {
+            DispatchQueue.main.async { self.showPopover() }
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--capture"), CommandLine.arguments.indices.contains(index + 1) {
-            showPanel()
             let path = CommandLine.arguments[index + 1]
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(6))
-                guard let view = self.panel.contentView,
-                      let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+                self.showPopover()
+                try? await Task.sleep(for: .milliseconds(300))
+                guard self.popover.isShown,
+                      let window = self.popover.contentViewController?.view.window,
+                      let view = window.contentView,
+                      let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                    print("Threadwork capture failed: dropdown is not visible.")
+                    return
+                }
+                print("Dropdown frame: \(window.frame); menu-bar anchor: \(self.statusItem.button?.window?.frame ?? .zero)")
                 view.cacheDisplay(in: view.bounds, to: bitmap)
                 if let png = bitmap.representation(using: .png, properties: [:]) {
                     try? png.write(to: URL(fileURLWithPath: path))
-                    print("Captured live Threadwork panel: \(path)")
+                    print("Captured live Threadwork dropdown: \(path)")
                 }
             }
         }
     }
 
-    @objc private func toggle() { panel.isVisible ? panel.orderOut(nil) : showPanel() }
+    @objc private func toggle() { popover.isShown ? popover.performClose(nil) : showPopover() }
 
-    private func showPanel() {
-        let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main
-        if let frame = screen?.visibleFrame {
-            let height = min(700, frame.height - 40)
-            panel.setContentSize(NSSize(width: 520, height: height))
-            panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2,
-                                         y: frame.maxY - panel.frame.height - min(100, frame.height * 0.12)))
+    private func showPopover() {
+        guard !popover.isShown, let button = statusItem.button else { return }
+        if let frame = button.window?.screen?.visibleFrame {
+            popover.contentSize = NSSize(width: 520, height: min(700, frame.height - 40))
         }
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        if panel.attachedSheet == nil { panel.orderOut(nil) }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
     }
 
     private func registerShortcut() {
@@ -109,9 +101,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let handler { RemoveEventHandler(handler) }
         if let localMonitor { NSEvent.removeMonitor(localMonitor) }
     }
-}
-
-final class QuickPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
 }
